@@ -1,0 +1,143 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © trading-scripts-library
+
+//@version=6
+strategy("RSI Mean Reversion Strategy",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DESCRIPTION
+// A mean reversion strategy based on RSI extremes with confirmation.
+// - Long entry: RSI crosses back above oversold level + optional EMA confirmation
+// - Long exit: RSI reaches overbought OR stop loss/take profit hit
+// - Short entry: RSI crosses back below overbought level + optional EMA confirmation
+// - Short exit: RSI reaches oversold OR stop loss/take profit hit
+// Best suited for ranging/choppy markets on higher timeframes (1H+).
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+group_rsi = "RSI Settings"
+rsiLength = input.int(14, "RSI Length", minval=1, group=group_rsi)
+oversoldLevel = input.int(30, "Oversold Level", minval=1, maxval=50, group=group_rsi)
+overboughtLevel = input.int(70, "Overbought Level", minval=50, maxval=99, group=group_rsi)
+
+group_confirm = "Confirmation Settings"
+useEMAConfirm = input.bool(true, "Require EMA Confirmation", group=group_confirm)
+confirmEMALength = input.int(50, "Confirmation EMA Length", minval=1, group=group_confirm)
+requireCandleConfirm = input.bool(true, "Require Bullish/Bearish Candle", group=group_confirm)
+
+group_risk = "Risk Management"
+useStopLoss = input.bool(true, "Use Stop Loss", group=group_risk)
+stopLossPercent = input.float(2.0, "Stop Loss %", minval=0.1, step=0.1, group=group_risk)
+useTakeProfit = input.bool(true, "Use Take Profit", group=group_risk)
+takeProfitPercent = input.float(4.0, "Take Profit %", minval=0.1, step=0.1, group=group_risk)
+
+group_trade = "Trade Settings"
+allowShorts = input.bool(true, "Allow Short Trades", group=group_trade)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+rsi = ta.rsi(close, rsiLength)
+confirmEMA = ta.ema(close, confirmEMALength)
+
+// RSI crossover detection (crossing back from extreme)
+rsiCrossAboveOversold = ta.crossover(rsi, oversoldLevel)
+rsiCrossBelowOverbought = ta.crossunder(rsi, overboughtLevel)
+
+// Candle confirmation
+bullishCandle = close > open
+bearishCandle = close < open
+
+// EMA confirmation
+priceAboveEMA = close > confirmEMA
+priceBelowEMA = close < confirmEMA
+
+// Combined confirmation
+longConfirmed = (not useEMAConfirm or priceAboveEMA) and (not requireCandleConfirm or bullishCandle)
+shortConfirmed = (not useEMAConfirm or priceBelowEMA) and (not requireCandleConfirm or bearishCandle)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTRY/EXIT CONDITIONS
+// ─────────────────────────────────────────────────────────────────────────────
+longCondition = rsiCrossAboveOversold and longConfirmed
+shortCondition = rsiCrossBelowOverbought and shortConfirmed and allowShorts
+
+// Exit on opposite extreme
+longExitRSI = rsi >= overboughtLevel
+shortExitRSI = rsi <= oversoldLevel
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STRATEGY EXECUTION
+// ─────────────────────────────────────────────────────────────────────────────
+if longCondition
+    strategy.entry("Long", strategy.long)
+    if useStopLoss
+        strategy.exit("Long Exit", "Long",
+             stop=close * (1 - stopLossPercent/100),
+             limit=useTakeProfit ? close * (1 + takeProfitPercent/100) : na)
+
+if shortCondition
+    strategy.entry("Short", strategy.short)
+    if useStopLoss
+        strategy.exit("Short Exit", "Short",
+             stop=close * (1 + stopLossPercent/100),
+             limit=useTakeProfit ? close * (1 - takeProfitPercent/100) : na)
+
+// RSI-based exits
+if longExitRSI and strategy.position_size > 0
+    strategy.close("Long", comment="RSI Overbought")
+
+if shortExitRSI and strategy.position_size < 0
+    strategy.close("Short", comment="RSI Oversold")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLOTTING
+// ─────────────────────────────────────────────────────────────────────────────
+plot(useEMAConfirm ? confirmEMA : na, "Confirmation EMA", color=color.new(color.purple, 30), linewidth=2)
+
+// Signal markers
+plotshape(longCondition, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.normal)
+plotshape(shortCondition, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.normal)
+
+// Background highlighting for RSI extremes
+bgcolor(rsi < oversoldLevel ? color.new(color.green, 90) : rsi > overboughtLevel ? color.new(color.red, 90) : na)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RSI PANEL (separate pane)
+// ─────────────────────────────────────────────────────────────────────────────
+// Uncomment below to display RSI in a separate pane
+// hline(overboughtLevel, "Overbought", color=color.red, linestyle=hline.style_dashed)
+// hline(oversoldLevel, "Oversold", color=color.green, linestyle=hline.style_dashed)
+// hline(50, "Midline", color=color.gray, linestyle=hline.style_dotted)
+// plot(rsi, "RSI", color=color.new(color.purple, 0), linewidth=2)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALERTS
+// ─────────────────────────────────────────────────────────────────────────────
+alertcondition(longCondition, "RSI Long Entry", "RSI Mean Reversion: Long entry - RSI crossed above oversold")
+alertcondition(shortCondition, "RSI Short Entry", "RSI Mean Reversion: Short entry - RSI crossed below overbought")
+alertcondition(longExitRSI, "RSI Long Exit", "RSI Mean Reversion: Long exit - RSI reached overbought")
+alertcondition(shortExitRSI, "RSI Short Exit", "RSI Mean Reversion: Short exit - RSI reached oversold")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INFO TABLE
+// ─────────────────────────────────────────────────────────────────────────────
+var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 80))
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "RSI", text_color=color.white)
+    table.cell(infoTable, 1, 0, str.tostring(rsi, "#.##"), text_color=rsi > overboughtLevel ? color.red : rsi < oversoldLevel ? color.green : color.white)
+    table.cell(infoTable, 0, 1, "Signal", text_color=color.white)
+    table.cell(infoTable, 1, 1, rsi < oversoldLevel ? "OVERSOLD" : rsi > overboughtLevel ? "OVERBOUGHT" : "NEUTRAL",
+         text_color=rsi < oversoldLevel ? color.green : rsi > overboughtLevel ? color.red : color.gray)
+    table.cell(infoTable, 0, 2, "Position", text_color=color.white)
+    table.cell(infoTable, 1, 2, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT",
+         text_color=strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray)

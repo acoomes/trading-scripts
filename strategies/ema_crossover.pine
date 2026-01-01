@@ -1,0 +1,102 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © trading-scripts-library
+
+//@version=6
+strategy("EMA Crossover Strategy",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DESCRIPTION
+// A classic dual EMA crossover strategy with an optional trend filter.
+// - Long entry: Fast EMA crosses above Slow EMA (and price above Trend EMA if enabled)
+// - Long exit: Fast EMA crosses below Slow EMA
+// - Short entry: Fast EMA crosses below Slow EMA (and price below Trend EMA if enabled)
+// - Short exit: Fast EMA crosses above Slow EMA
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+group_ema = "EMA Settings"
+fastLength = input.int(9, "Fast EMA Length", minval=1, group=group_ema)
+slowLength = input.int(21, "Slow EMA Length", minval=1, group=group_ema)
+trendLength = input.int(200, "Trend EMA Length", minval=1, group=group_ema)
+
+group_filter = "Filters"
+useTrendFilter = input.bool(true, "Use Trend Filter (200 EMA)", group=group_filter)
+allowShorts = input.bool(true, "Allow Short Trades", group=group_filter)
+
+group_time = "Trading Hours (Exchange Time)"
+useTimeFilter = input.bool(false, "Use Time Filter", group=group_time)
+startHour = input.int(9, "Start Hour", minval=0, maxval=23, group=group_time)
+endHour = input.int(16, "End Hour", minval=0, maxval=23, group=group_time)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+fastEMA = ta.ema(close, fastLength)
+slowEMA = ta.ema(close, slowLength)
+trendEMA = ta.ema(close, trendLength)
+
+// Crossover detection
+bullishCross = ta.crossover(fastEMA, slowEMA)
+bearishCross = ta.crossunder(fastEMA, slowEMA)
+
+// Trend conditions
+inUptrend = not useTrendFilter or close > trendEMA
+inDowntrend = not useTrendFilter or close < trendEMA
+
+// Time filter
+currentHour = hour(time)
+inTradingHours = not useTimeFilter or (currentHour >= startHour and currentHour < endHour)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTRY/EXIT CONDITIONS
+// ─────────────────────────────────────────────────────────────────────────────
+longCondition = bullishCross and inUptrend and inTradingHours
+shortCondition = bearishCross and inDowntrend and inTradingHours and allowShorts
+
+longExitCondition = bearishCross
+shortExitCondition = bullishCross
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STRATEGY EXECUTION
+// ─────────────────────────────────────────────────────────────────────────────
+if longCondition
+    strategy.entry("Long", strategy.long)
+
+if shortCondition
+    strategy.entry("Short", strategy.short)
+
+if longExitCondition
+    strategy.close("Long")
+
+if shortExitCondition
+    strategy.close("Short")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLOTTING
+// ─────────────────────────────────────────────────────────────────────────────
+plot(fastEMA, "Fast EMA", color=color.new(color.blue, 0), linewidth=2)
+plot(slowEMA, "Slow EMA", color=color.new(color.orange, 0), linewidth=2)
+plot(useTrendFilter ? trendEMA : na, "Trend EMA", color=color.new(color.gray, 50), linewidth=1)
+
+// Signal markers
+plotshape(longCondition, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortCondition, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Background color for trend
+bgcolor(useTrendFilter ? (inUptrend ? color.new(color.green, 95) : color.new(color.red, 95)) : na)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALERTS
+// ─────────────────────────────────────────────────────────────────────────────
+alertcondition(longCondition, "EMA Long Entry", "EMA Crossover: Long entry signal")
+alertcondition(shortCondition, "EMA Short Entry", "EMA Crossover: Short entry signal")
+alertcondition(longExitCondition, "EMA Long Exit", "EMA Crossover: Long exit signal")
+alertcondition(shortExitCondition, "EMA Short Exit", "EMA Crossover: Short exit signal")
